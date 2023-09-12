@@ -3,6 +3,7 @@ const zmath = @import("zmath");
 
 const rsc = @import("rscmgr.zig");
 const sp = @import("sprite.zig");
+const lvl = @import("level.zig");
 
 pub const GameState = enum {
     game_active,
@@ -12,11 +13,10 @@ pub const GameState = enum {
 
 pub fn new(width: u32, height: u32) Game {
     return Game{
-        .state = GameState.game_active,
         .keys = [_]bool{false} ** 1024,
         .width = width,
         .height = height,
-        .renderer = undefined,
+        .levels = [_]lvl.Level{undefined} ** 4,
     };
 }
 
@@ -25,7 +25,9 @@ pub const Game = struct {
     keys: [1024]bool,
     width: u32,
     height: u32,
-    renderer: sp.Renderer,
+    renderer: sp.Renderer = undefined,
+    levels: [4]lvl.Level,
+    current_level: u32 = 0,
 
     pub fn init(self: *Game) !void {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -48,7 +50,13 @@ pub const Game = struct {
         self.renderer = sp.new(shader);
         self.renderer.init();
 
+        _ = try rsc.loadTexture("textures/background.jpg", "background");
         _ = try rsc.loadTexture("textures/awesomeface.png", "face");
+        _ = try rsc.loadTexture("textures/block_solid.png", "block_solid");
+        _ = try rsc.loadTexture("textures/block.png", "block");
+
+        self.levels[0] = try lvl.loadLevel(gpa.allocator(), "levels/one.lvl", self.width, self.height / 2);
+        std.debug.assert(self.levels[0].bricks.items.len > 0);
     }
 
     pub fn deinit(self: *Game) void {
@@ -67,12 +75,15 @@ pub const Game = struct {
     }
 
     pub fn render(self: *Game) void {
-        self.renderer.drawSprite(
-            rsc.getTexture("face").?,
-            zmath.f32x4(200.0, 200.0, 0.0, 0.0),
-            zmath.f32x4(300.0, 400.0, 0.0, 0.0),
-            45.0,
-            zmath.f32x4(0.0, 1.0, 0.0, 1.0),
-        );
+        if (self.state == .game_active) {
+            self.renderer.drawSprite(
+                rsc.getTexture("background").?,
+                zmath.f32x4(0.0, 0.0, 0.0, 1.0),
+                zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
+                0.0,
+                zmath.f32x4s(1.0),
+            );
+            self.levels[self.current_level].draw(self.renderer);
+        }
     }
 };
