@@ -35,17 +35,17 @@ pub fn main() !void {
     };
 
     if (glfw.Window.setKeyCallback(window, keyCallback)) |_| {} else {
-        std.log.debug("setKeyCallback returned null", .{});
+        // std.log.debug("setKeyCallback returned null", .{});
     }
     if (glfw.Window.setFramebufferSizeCallback(window, framebufferSizeCallback)) |_| {} else {
-        std.log.debug("setFramebufferSizeCallback returned null", .{});
+        // std.log.debug("setFramebufferSizeCallback returned null", .{});
     }
 
     gl.viewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    breakout.init();
+    try breakout.init();
 
     var delta_time: f64 = 0.0; // time between current frame and last frame
     var last_frame: f64 = 0.0; // time of last frame
@@ -56,17 +56,18 @@ pub fn main() !void {
         last_frame = current_frame;
         glfw.pollEvents();
 
-        // breakout.processInput(delta_time);
+        breakout.processInput(delta_time);
 
-        // breakout.update(delta_time);
+        breakout.update(delta_time);
 
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);
-        // breakout.render();
+        breakout.render();
 
         window.swapBuffers();
     }
 
+    std.log.debug("exited game loop", .{});
     // clear the resource manager...
 
 }
