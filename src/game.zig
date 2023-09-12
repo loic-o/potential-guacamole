@@ -1,6 +1,8 @@
 const std = @import("std");
+const glfw = @import("zglfw");
 const zmath = @import("zmath");
 
+const tx = @import("texture.zig");
 const rsc = @import("rscmgr.zig");
 const sp = @import("sprite.zig");
 const lvl = @import("level.zig");
@@ -28,6 +30,7 @@ pub const Game = struct {
     renderer: sp.Renderer = undefined,
     levels: [4]lvl.Level,
     current_level: u32 = 0,
+    player: Player = undefined,
 
     pub fn init(self: *Game) !void {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -54,9 +57,17 @@ pub const Game = struct {
         _ = try rsc.loadTexture("textures/awesomeface.png", "face");
         _ = try rsc.loadTexture("textures/block_solid.png", "block_solid");
         _ = try rsc.loadTexture("textures/block.png", "block");
+        _ = try rsc.loadTexture("textures/paddle.png", "paddle");
 
         self.levels[0] = try lvl.loadLevel(gpa.allocator(), "levels/one.lvl", self.width, self.height / 2);
-        std.debug.assert(self.levels[0].bricks.items.len > 0);
+        self.levels[1] = try lvl.loadLevel(gpa.allocator(), "levels/two.lvl", self.width, self.height / 2);
+        self.levels[2] = try lvl.loadLevel(gpa.allocator(), "levels/three.lvl", self.width, self.height / 2);
+        self.levels[3] = try lvl.loadLevel(gpa.allocator(), "levels/four.lvl", self.width, self.height / 2);
+
+        self.player = Player{
+            .position = zmath.f32x4(@as(f32, @floatFromInt(self.width)) / 2.0 - 50.0, @as(f32, @floatFromInt(self.height)) - 20.0, 0.0, 1.0),
+            .sprite = rsc.getTexture("paddle"),
+        };
     }
 
     pub fn deinit(self: *Game) void {
@@ -65,8 +76,19 @@ pub const Game = struct {
     }
 
     pub fn processInput(self: *Game, dt: f64) void {
-        _ = self;
-        _ = dt;
+        if (self.state == .game_active) {
+            const vel = self.player.velocity[0] * dt;
+            if (self.keys[@intFromEnum(glfw.Key.a)]) {
+                if (self.player.position[0] >= 0.0) {
+                    self.player.position[0] -= @floatCast(vel);
+                }
+            }
+            if (self.keys[@intFromEnum(glfw.Key.d)]) {
+                if (self.player.position[0] <= @as(f32, @floatFromInt(self.width)) - self.player.size[0]) {
+                    self.player.position[0] += @floatCast(vel);
+                }
+            }
+        }
     }
 
     pub fn update(self: *Game, dt: f64) void {
@@ -84,6 +106,21 @@ pub const Game = struct {
                 zmath.f32x4s(1.0),
             );
             self.levels[self.current_level].draw(self.renderer);
+            self.player.draw(self.renderer);
         }
+    }
+};
+
+pub const Player = struct {
+    position: zmath.Vec = zmath.f32x4(0.0, 0.0, 0.0, 1.0),
+    size: zmath.Vec = zmath.f32x4(100.0, 20.0, 0.0, 0.0),
+    color: zmath.Vec = zmath.f32x4s(1.0),
+    velocity: zmath.Vec = zmath.f32x4(500.0, 0.0, 0.0, 0.0),
+    is_solid: bool = false,
+    destroyed: bool = false,
+    sprite: ?tx.Texture,
+
+    pub fn draw(self: @This(), renderer: sp.Renderer) void {
+        renderer.drawSprite(self.sprite.?, self.position, self.size, 0.0, self.color);
     }
 };
