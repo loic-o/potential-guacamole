@@ -6,6 +6,7 @@ const tx = @import("texture.zig");
 const rsc = @import("rscmgr.zig");
 const sp = @import("sprite.zig");
 const lvl = @import("level.zig");
+const ptcl = @import("particles.zig");
 
 const default_player_size = zmath.f32x4(100.0, 20.0, 0.0, 0.0);
 const default_player_velocity: f32 = 500.0;
@@ -38,6 +39,7 @@ pub const Game = struct {
     current_level: u32 = 0,
     player: Player = undefined,
     ball: Ball = undefined,
+    particles: ptcl.ParticleGenerator = undefined,
 
     pub fn init(self: *Game) !void {
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -87,11 +89,19 @@ pub const Game = struct {
             .sprite = rsc.getTexture("face"),
             .velocity = initial_ball_velocity,
         };
+
+        const pshader = try rsc.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
+        pshader.setMatrix4("projection", projection, true);
+        // const ptexture = try rsc.loadTexture("textures/particle.png", "particle");
+        // _ = ptexture;
+        // self.particles = try ptcl.ParticleGenerator.init(gpa.allocator(), 500, pshader, ptexture);
+        std.log.debug("game initialization complete.", .{});
     }
 
     pub fn deinit(self: *Game) void {
         rsc.deinit();
         self.renderer.deinit();
+        self.particles.deinit();
     }
 
     pub fn processInput(self: *Game, dt: f64) void {
@@ -123,10 +133,28 @@ pub const Game = struct {
         _ = self.ball.move(dt, self.width);
         self.doCollisions();
 
+        // self.particles.update(dt, self.ball, 2, zmath.f32x4(self.ball.radius / 2, self.ball.radius / 2, 0, 0));
+
         if (self.ball.position[1] >= @as(f32, @floatFromInt(self.height))) {
             // not sure i want to do this....start over?
             self.resetLevel();
             self.resetPlayer();
+        }
+    }
+
+    pub fn render(self: *Game) void {
+        if (self.state == .game_active) {
+            self.renderer.drawSprite(
+                rsc.getTexture("background").?,
+                zmath.f32x4(0.0, 0.0, 0.0, 1.0),
+                zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
+                0.0,
+                zmath.f32x4s(1.0),
+            );
+            self.levels[self.current_level].draw(self.renderer);
+            self.player.draw(self.renderer);
+            // self.particles.draw();
+            self.ball.draw(self.renderer);
         }
     }
 
@@ -199,21 +227,6 @@ pub const Game = struct {
             // so always just assume that it hit the top (so it wont bounce down and try again...
             self.ball.velocity[1] = -1.0 * @fabs(self.ball.velocity[1]);
             self.ball.velocity = zmath.normalize2(self.ball.velocity) * zmath.length2(old_velocity);
-        }
-    }
-
-    pub fn render(self: *Game) void {
-        if (self.state == .game_active) {
-            self.renderer.drawSprite(
-                rsc.getTexture("background").?,
-                zmath.f32x4(0.0, 0.0, 0.0, 1.0),
-                zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
-                0.0,
-                zmath.f32x4s(1.0),
-            );
-            self.levels[self.current_level].draw(self.renderer);
-            self.player.draw(self.renderer);
-            self.ball.draw(self.renderer);
         }
     }
 };
