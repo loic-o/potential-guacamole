@@ -72,7 +72,12 @@ pub const Game = struct {
         self.levels[3] = try lvl.loadLevel(gpa.allocator(), "levels/four.lvl", self.width, self.height / 2);
 
         self.player = Player{
-            .position = zmath.f32x4(@as(f32, @floatFromInt(self.width)) / 2.0 - 50.0, @as(f32, @floatFromInt(self.height)) - 20.0, 0.0, 1.0),
+            .position = zmath.f32x4(
+                @as(f32, @floatFromInt(self.width)) / 2.0 - (default_player_size[0] / 2.0),
+                @as(f32, @floatFromInt(self.height)) - default_player_size[1],
+                0.0,
+                1.0,
+            ),
             .sprite = rsc.getTexture("paddle"),
         };
 
@@ -117,18 +122,83 @@ pub const Game = struct {
     pub fn update(self: *Game, dt: f64) void {
         _ = self.ball.move(dt, self.width);
         self.doCollisions();
+
+        if (self.ball.position[1] >= @as(f32, @floatFromInt(self.height))) {
+            // not sure i want to do this....start over?
+            self.resetLevel();
+            self.resetPlayer();
+        }
+    }
+
+    fn resetLevel(self: *@This()) void {
+        for (self.levels[self.current_level].bricks.items) |*br| {
+            br.destroyed = false;
+        }
+    }
+
+    fn resetPlayer(self: *@This()) void {
+        self.player.position = zmath.f32x4(
+            @as(f32, @floatFromInt(self.width)) / 2.0 - (default_player_size[0] / 2.0),
+            @as(f32, @floatFromInt(self.height)) - default_player_size[1],
+            0.0,
+            1.0,
+        );
+        self.ball.stuck = true;
+        const ball_pos = self.player.position + [_]f32{ default_player_size[0] / 2.0 - default_ball_radius, -default_ball_radius * 2.0, 0.0, 0.0 };
+        self.ball.position = ball_pos;
     }
 
     fn doCollisions(self: *Game) void {
+        // check all the bricks...
         for (self.levels[self.current_level].bricks.items) |*br| {
             if (!br.destroyed) {
-                // if (checkCollision(self.ball.position, self.ball.size, br.position, br.size)) {
-                if (checkBallCollision(self.ball.position, self.ball.radius, br.position, br.size)) {
-                    if (br.is_solid) {
+                const collision_result = checkBallCollision(self.ball.position, self.ball.radius, br.position, br.size);
+                if (collision_result.collided) {
+                    if (!br.is_solid) {
                         br.destroyed = true;
+                    }
+                    // resolve the collision
+                    switch (collision_result.direction.?) {
+                        .left, .right => {
+                            self.ball.velocity[0] = -self.ball.velocity[0]; // reverse horizontal Direction
+                            // relocate
+                            const penetration = self.ball.radius - @fabs(collision_result.difference.?[0]);
+                            if (collision_result.direction.? == .left) {
+                                self.ball.position[0] += penetration;
+                            } else {
+                                self.ball.position[0] -= penetration;
+                            }
+                        },
+                        else => {
+                            self.ball.velocity[1] = -self.ball.velocity[1]; // reverse vertical Direction
+                            // relocate
+                            const penetration = self.ball.radius - @fabs(collision_result.difference.?[1]);
+                            if (collision_result.direction.? == .up) {
+                                self.ball.position[1] -= penetration;
+                            } else {
+                                self.ball.position[1] += penetration;
+                            }
+                        },
                     }
                 }
             }
+        }
+        // check the paddle
+        const collision = checkBallCollision(self.ball.position, self.ball.radius, self.player.position, self.player.size);
+        if (!self.ball.stuck and collision.collided) {
+            // check where it hit the board, and change the velocity based on where it hit the board
+            const center_board = self.player.position[0] + self.player.size[0] / 2.0;
+            const distance = (self.ball.position[0] + self.ball.radius) - center_board;
+            const percentage = distance / (self.player.size[0] / 2.0);
+            // then move accordingly
+            const strength = 2.0;
+            const old_velocity = self.ball.velocity;
+            self.ball.velocity[0] = initial_ball_velocity[0] * percentage * strength;
+            // this is a prob if the ball makes it inside of the paddle and gets stuck
+            // self.ball.velocity[1] = -self.ball.velocity[1];
+            // so always just assume that it hit the top (so it wont bounce down and try again...
+            self.ball.velocity[1] = -1.0 * @fabs(self.ball.velocity[1]);
+            self.ball.velocity = zmath.normalize2(self.ball.velocity) * zmath.length2(old_velocity);
         }
     }
 
@@ -174,7 +244,7 @@ pub const Ball = struct {
     pub fn move(self: *@This(), dt: f64, window_width: u32) zmath.Vec {
         const ww = @as(f32, @floatFromInt(window_width));
         const t = @as(f32, @floatCast(dt));
-        if (self.stuck) {
+        if (!self.stuck) {
             self.position += (self.velocity * [_]f32{ t, t, 1.0, 1.0 });
             if (self.position[0] <= 0.0) {
                 self.velocity[0] = -self.velocity[0];
@@ -201,7 +271,14 @@ pub const Ball = struct {
     }
 };
 
-fn checkBallCollision(ball_pos: zmath.Vec, ball_radius: f32, box_position: zmath.Vec, box_size: zmath.Vec) bool {
+const CollisionResult = struct {
+    collided: bool,
+    direction: ?Direction,
+    difference: ?zmath.Vec,
+};
+
+/// NOTE: a tagged union here - for the return type - is probably appropriate
+fn checkBallCollision(ball_pos: zmath.Vec, ball_radius: f32, box_position: zmath.Vec, box_size: zmath.Vec) CollisionResult {
     const center = ball_pos + [_]f32{ ball_radius, ball_radius, 0.0, 0.0 };
     const aabb_half_ext = box_size * [_]f32{ 0.5, 0.5, 0.0, 0.0 };
     const aabb_center = box_position + aabb_half_ext;
@@ -209,11 +286,49 @@ fn checkBallCollision(ball_pos: zmath.Vec, ball_radius: f32, box_position: zmath
     const clamped = zmath.clamp(diff, -aabb_half_ext, aabb_half_ext);
     const closest = aabb_center + clamped;
     diff = closest - center;
-    return zmath.length2(diff)[0] < ball_radius;
+    if (zmath.length2(diff)[0] < ball_radius) {
+        return .{
+            .collided = true,
+            .direction = vectorDirection(diff),
+            .difference = diff,
+        };
+    } else {
+        return .{
+            .collided = false,
+            .direction = null,
+            .difference = null,
+        };
+    }
 }
 
 fn checkCollision(pos1: zmath.Vec, sz1: zmath.Vec, pos2: zmath.Vec, sz2: zmath.Vec) bool {
     const coll_x = (pos1[0] + sz1[0] >= pos2[0]) and (pos2[0] + sz2[0] >= pos1[0]);
     const coll_y = (pos1[1] + sz1[1] >= pos2[1]) and (pos2[1] + sz2[1] >= pos1[1]);
     return coll_x and coll_y;
+}
+
+const Direction = enum {
+    up,
+    right,
+    down,
+    left,
+};
+
+fn vectorDirection(target: zmath.Vec) Direction {
+    const compass = [_]zmath.Vec{
+        zmath.f32x4(0.0, 1.0, 0.0, 0.0), // up
+        zmath.f32x4(1.0, 0.0, 0.0, 0.0), // right
+        zmath.f32x4(0.0, -1.0, 0.0, 0.0), // down
+        zmath.f32x4(-1.0, 0.0, 0.0, 0.0), // left
+    };
+    var max: f32 = 0;
+    var best_match: ?usize = null;
+    for (compass, 0..) |comp, i| {
+        const dot_prod = zmath.dot2(zmath.normalize2(target), comp);
+        if (dot_prod[0] > max) {
+            max = dot_prod[0];
+            best_match = i;
+        }
+    }
+    return @enumFromInt(best_match.?);
 }

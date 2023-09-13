@@ -84,7 +84,7 @@ fn initBricks(bricks: *std.ArrayList(Brick), tile_data: std.ArrayList(std.ArrayL
                     .position = pos,
                     .size = sz,
                     .color = clr,
-                    .is_solid = true,
+                    .is_solid = false,
                     .sprite = block_texture,
                 };
                 try bricks.append(brick);
