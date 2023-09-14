@@ -1,8 +1,8 @@
 const std = @import("std");
 const zmath = @import("zmath");
 const sp = @import("sprite.zig");
-const tx = @import("texture.zig");
-const rsc = @import("rscmgr.zig");
+const Texture = @import("Texture.zig");
+const ResourceManager = @import("ResourceManager.zig");
 
 pub const Brick = struct {
     position: zmath.Vec = zmath.f32x4(0.0, 0.0, 0.0, 1.0),
@@ -10,14 +10,14 @@ pub const Brick = struct {
     color: zmath.Vec = zmath.f32x4s(1.0),
     is_solid: bool = false,
     destroyed: bool = false,
-    sprite: ?tx.Texture,
+    sprite: ?Texture,
 
     pub fn draw(self: @This(), renderer: sp.Renderer) void {
         renderer.drawSprite(self.sprite.?, self.position, self.size, 0.0, self.color);
     }
 };
 
-pub fn loadLevel(allocator: std.mem.Allocator, file_path: []const u8, level_width: u32, level_height: u32) !Level {
+pub fn loadLevel(allocator: std.mem.Allocator, resource_manager: ResourceManager, file_path: []const u8, level_width: u32, level_height: u32) !Level {
     const level_file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_only });
     defer level_file.close();
     var level_text = try allocator.alloc(u8, try level_file.getEndPos());
@@ -44,21 +44,22 @@ pub fn loadLevel(allocator: std.mem.Allocator, file_path: []const u8, level_widt
     }
 
     var level = Level{
+        .allocator = allocator,
         .bricks = std.ArrayList(Brick).init(allocator),
     };
-    try initBricks(&level.bricks, tile_data, level_width, level_height);
+    try initBricks(resource_manager, &level.bricks, tile_data, level_width, level_height);
 
     return level;
 }
 
-fn initBricks(bricks: *std.ArrayList(Brick), tile_data: std.ArrayList(std.ArrayList(u8)), level_width: u32, level_height: u32) !void {
+fn initBricks(resource_manager: ResourceManager, bricks: *std.ArrayList(Brick), tile_data: std.ArrayList(std.ArrayList(u8)), level_width: u32, level_height: u32) !void {
     const height = tile_data.items.len;
     const width = tile_data.items[0].items.len;
     const unit_width = @as(f32, @floatFromInt(level_width)) / @as(f32, @floatFromInt(width));
     const unit_height = @as(f32, @floatFromInt(level_height)) / @as(f32, @floatFromInt(height));
 
-    const solid_texture = rsc.getTexture("block_solid").?;
-    const block_texture = rsc.getTexture("block").?;
+    const solid_texture = resource_manager.getTexture("block_solid").?;
+    const block_texture = resource_manager.getTexture("block").?;
 
     for (tile_data.items, 0..) |row, y| {
         for (row.items, 0..) |br, x| {
@@ -94,6 +95,7 @@ fn initBricks(bricks: *std.ArrayList(Brick), tile_data: std.ArrayList(std.ArrayL
 }
 
 pub const Level = struct {
+    allocator: std.mem.Allocator,
     bricks: std.ArrayList(Brick),
 
     pub fn draw(self: @This(), renderer: sp.Renderer) void {
@@ -107,5 +109,9 @@ pub const Level = struct {
     pub fn isCompleted(self: @This()) bool {
         _ = self;
         return false;
+    }
+
+    pub fn deinit(self: *@This()) void {
+        self.bricks.deinit();
     }
 };

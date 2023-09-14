@@ -45,7 +45,9 @@ pub fn main() !void {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    try breakout.init();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    try breakout.init(allocator);
 
     var delta_time: f64 = 0.0; // time between current frame and last frame
     var last_frame: f64 = 0.0; // time of last frame
@@ -68,8 +70,8 @@ pub fn main() !void {
     }
 
     std.log.debug("exited game loop", .{});
-    // clear the resource manager...
-
+    breakout.deinit();
+    _ = gpa.deinit();
 }
 
 fn keyCallback(window: *glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) callconv(.C) void {

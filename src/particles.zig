@@ -4,8 +4,8 @@ const gl = @import("zopengl");
 const zmath = @import("zmath");
 
 const Ball = @import("game.zig").Ball;
-const sh = @import("shader.zig");
-const tx = @import("texture.zig");
+const Shader = @import("Shader.zig");
+const Texture = @import("Texture.zig");
 
 pub const Particle = struct {
     position: zmath.Vec = zmath.f32x4(0, 0, 0, 1),
@@ -18,14 +18,14 @@ pub const ParticleGenerator = struct {
     const Self = @This();
 
     num_particles: u32 = 500,
-    shader: sh.Shader,
-    sprite: tx.Texture,
+    shader: Shader,
+    sprite: Texture,
     particles: std.ArrayList(Particle),
     prng: std.rand.Random,
     vao: u32,
     arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, comptime max_particles: u32, shader: sh.Shader, texture: tx.Texture) !Self {
+    pub fn init(allocator: std.mem.Allocator, comptime max_particles: u32, shader: Shader, texture: Texture) !Self {
         var rnd = std.rand.DefaultPrng.init(0);
         var prng = rnd.random();
 

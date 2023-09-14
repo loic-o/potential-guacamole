@@ -2,16 +2,15 @@ const std = @import("std");
 const glfw = @import("zglfw");
 const zmath = @import("zmath");
 
-const tx = @import("texture.zig");
-const rsc = @import("rscmgr.zig");
+const Texture = @import("Texture.zig");
 const sp = @import("sprite.zig");
 const lvl = @import("level.zig");
 const ptcl = @import("particles.zig");
+const ResourceManager = @import("ResourceManager.zig");
 
 const default_player_size = zmath.f32x4(100.0, 20.0, 0.0, 0.0);
 const default_player_velocity: f32 = 500.0;
 const initial_ball_velocity = zmath.f32x4(100.0, -350.0, 0.0, 0.0);
-// const initial_ball_velocity = zmath.f32x4(25.0, -82.0, 0.0, 0.0);
 const default_ball_radius: f32 = 12.5;
 
 pub const GameState = enum {
@@ -30,6 +29,7 @@ pub fn new(width: u32, height: u32) Game {
 }
 
 pub const Game = struct {
+    allocator: std.mem.Allocator = undefined,
     state: GameState = GameState.game_active,
     keys: [1024]bool,
     width: u32,
@@ -40,13 +40,13 @@ pub const Game = struct {
     player: Player = undefined,
     ball: Ball = undefined,
     particles: ptcl.ParticleGenerator = undefined,
+    resource_manager: ResourceManager = undefined,
 
-    pub fn init(self: *Game) !void {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        rsc.init(gpa.allocator());
+    pub fn init(self: *Game, allocator: std.mem.Allocator) !void {
+        self.allocator = allocator;
+        self.resource_manager = ResourceManager.init(allocator);
 
-        _ = try rsc.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
-        var shader = rsc.getShader("sprite").?;
+        var shader = try self.resource_manager.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
 
         var projection = zmath.orthographicOffCenterRhGl(
             0.0, // left
@@ -62,16 +62,16 @@ pub const Game = struct {
         self.renderer = sp.new(shader);
         self.renderer.init();
 
-        _ = try rsc.loadTexture("textures/background.jpg", "background");
-        _ = try rsc.loadTexture("textures/awesomeface.png", "face");
-        _ = try rsc.loadTexture("textures/block_solid.png", "block_solid");
-        _ = try rsc.loadTexture("textures/block.png", "block");
-        _ = try rsc.loadTexture("textures/paddle.png", "paddle");
+        _ = try self.resource_manager.loadTexture("textures/background.jpg", "background");
+        _ = try self.resource_manager.loadTexture("textures/awesomeface.png", "face");
+        _ = try self.resource_manager.loadTexture("textures/block_solid.png", "block_solid");
+        _ = try self.resource_manager.loadTexture("textures/block.png", "block");
+        _ = try self.resource_manager.loadTexture("textures/paddle.png", "paddle");
 
-        self.levels[0] = try lvl.loadLevel(gpa.allocator(), "levels/one.lvl", self.width, self.height / 2);
-        self.levels[1] = try lvl.loadLevel(gpa.allocator(), "levels/two.lvl", self.width, self.height / 2);
-        self.levels[2] = try lvl.loadLevel(gpa.allocator(), "levels/three.lvl", self.width, self.height / 2);
-        self.levels[3] = try lvl.loadLevel(gpa.allocator(), "levels/four.lvl", self.width, self.height / 2);
+        self.levels[0] = try lvl.loadLevel(allocator, self.resource_manager, "levels/one.lvl", self.width, self.height / 2);
+        self.levels[1] = try lvl.loadLevel(allocator, self.resource_manager, "levels/two.lvl", self.width, self.height / 2);
+        self.levels[2] = try lvl.loadLevel(allocator, self.resource_manager, "levels/three.lvl", self.width, self.height / 2);
+        self.levels[3] = try lvl.loadLevel(allocator, self.resource_manager, "levels/four.lvl", self.width, self.height / 2);
 
         self.player = Player{
             .position = zmath.f32x4(
@@ -80,28 +80,30 @@ pub const Game = struct {
                 0.0,
                 1.0,
             ),
-            .sprite = rsc.getTexture("paddle"),
+            .sprite = self.resource_manager.getTexture("paddle"),
         };
 
         const ball_pos = self.player.position + [_]f32{ default_player_size[0] / 2.0 - default_ball_radius, -default_ball_radius * 2.0, 0.0, 0.0 };
         self.ball = Ball{
             .position = ball_pos,
-            .sprite = rsc.getTexture("face"),
+            .sprite = self.resource_manager.getTexture("face"),
             .velocity = initial_ball_velocity,
         };
 
-        const pshader = try rsc.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
+        const pshader = try self.resource_manager.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
         pshader.setMatrix4("projection", projection, true);
-        // const ptexture = try rsc.loadTexture("textures/particle.png", "particle");
-        // _ = ptexture;
-        // self.particles = try ptcl.ParticleGenerator.init(gpa.allocator(), 500, pshader, ptexture);
+        const ptexture = try self.resource_manager.loadTexture("textures/particle.png", "particle");
+        self.particles = try ptcl.ParticleGenerator.init(self.allocator, 500, pshader, ptexture);
         std.log.debug("game initialization complete.", .{});
     }
 
     pub fn deinit(self: *Game) void {
-        rsc.deinit();
-        self.renderer.deinit();
         self.particles.deinit();
+        for (&self.levels) |*level| {
+            level.deinit();
+        }
+        self.renderer.deinit();
+        self.resource_manager.deinit();
     }
 
     pub fn processInput(self: *Game, dt: f64) void {
@@ -133,7 +135,7 @@ pub const Game = struct {
         _ = self.ball.move(dt, self.width);
         self.doCollisions();
 
-        // self.particles.update(dt, self.ball, 2, zmath.f32x4(self.ball.radius / 2, self.ball.radius / 2, 0, 0));
+        self.particles.update(dt, self.ball, 2, zmath.f32x4(self.ball.radius / 2, self.ball.radius / 2, 0, 0));
 
         if (self.ball.position[1] >= @as(f32, @floatFromInt(self.height))) {
             // not sure i want to do this....start over?
@@ -145,7 +147,7 @@ pub const Game = struct {
     pub fn render(self: *Game) void {
         if (self.state == .game_active) {
             self.renderer.drawSprite(
-                rsc.getTexture("background").?,
+                self.resource_manager.getTexture("background").?,
                 zmath.f32x4(0.0, 0.0, 0.0, 1.0),
                 zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
                 0.0,
@@ -153,7 +155,7 @@ pub const Game = struct {
             );
             self.levels[self.current_level].draw(self.renderer);
             self.player.draw(self.renderer);
-            // self.particles.draw();
+            self.particles.draw();
             self.ball.draw(self.renderer);
         }
     }
@@ -238,7 +240,7 @@ pub const Player = struct {
     velocity: zmath.Vec = zmath.f32x4(default_player_velocity, 0.0, 0.0, 0.0),
     is_solid: bool = false,
     destroyed: bool = false,
-    sprite: ?tx.Texture,
+    sprite: ?Texture,
 
     pub fn draw(self: @This(), renderer: sp.Renderer) void {
         renderer.drawSprite(self.sprite.?, self.position, self.size, 0.0, self.color);
@@ -250,7 +252,7 @@ pub const Ball = struct {
     size: zmath.Vec = zmath.f32x4(default_ball_radius * 2.0, default_ball_radius * 2.0, 0.0, 0.0),
     color: zmath.Vec = zmath.f32x4s(1.0),
     velocity: zmath.Vec = zmath.f32x4(0.0, 0.0, 0.0, 0.0),
-    sprite: ?tx.Texture,
+    sprite: ?Texture,
     radius: f32 = 12.5,
     stuck: bool = true,
 

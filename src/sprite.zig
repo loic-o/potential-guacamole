@@ -1,10 +1,10 @@
 const std = @import("std");
 const gl = @import("zopengl");
 const zmath = @import("zmath");
-const sh = @import("shader.zig");
-const tx = @import("texture.zig");
+const Shader = @import("Shader.zig");
+const Texture = @import("Texture.zig");
 
-pub fn new(shader: sh.Shader) Renderer {
+pub fn new(shader: Shader) Renderer {
     return Renderer{
         .shader = shader,
         .vao = undefined,
@@ -12,7 +12,7 @@ pub fn new(shader: sh.Shader) Renderer {
 }
 
 pub const Renderer = struct {
-    shader: sh.Shader,
+    shader: Shader,
     vao: u32,
 
     pub fn init(self: *Renderer) void {
@@ -43,12 +43,12 @@ pub const Renderer = struct {
     }
 
     pub fn deinit(self: *Renderer) void {
-        std.log.debug("deinit the renderer", .{});
         gl.deleteVertexArrays(1, &self.vao);
         self.vao = undefined;
+        std.log.debug("deinit'd the renderer", .{});
     }
 
-    pub fn drawSprite(self: Renderer, texture: tx.Texture, position: zmath.Vec, size: zmath.Vec, rotate: f32, color: zmath.Vec) void {
+    pub fn drawSprite(self: Renderer, texture: Texture, position: zmath.Vec, size: zmath.Vec, rotate: f32, color: zmath.Vec) void {
         var model = zmath.translation(position[0], position[1], 0.0);
 
         model = zmath.mul(zmath.translation(0.5 * size[0], 0.5 * size[1], 0.0), model);
