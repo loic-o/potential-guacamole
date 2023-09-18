@@ -27,6 +27,7 @@ pub fn deinit(self: *Self) void {
     self.textures.deinit();
     self.shaders = undefined;
     self.textures = undefined;
+    stbi.deinit();
 }
 
 pub fn loadShader(self: *Self, vertex_path: []const u8, fragment_path: []const u8, geometry_path: ?[]const u8, name: []const u8) !Shader {
