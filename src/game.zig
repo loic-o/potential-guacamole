@@ -7,6 +7,7 @@ const sp = @import("sprite.zig");
 const lvl = @import("level.zig");
 const ptcl = @import("particles.zig");
 const ResourceManager = @import("ResourceManager.zig");
+const PostProcessor = @import("PostProcessor.zig");
 
 const default_player_size = zmath.f32x4(100.0, 20.0, 0.0, 0.0);
 const default_player_velocity: f32 = 500.0;
@@ -41,14 +42,17 @@ pub const Game = struct {
     ball: Ball = undefined,
     particles: ptcl.ParticleGenerator = undefined,
     resource_manager: ResourceManager = undefined,
+    effects: PostProcessor = undefined,
+    shake_time: f32 = 0.0,
 
     pub fn init(self: *Game, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.resource_manager = ResourceManager.init(allocator);
 
-        var shader = try self.resource_manager.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
-
-        var projection = zmath.orthographicOffCenterRhGl(
+        const sprite_shader = try self.resource_manager.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
+        const particle_shader = try self.resource_manager.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
+        const effect_shader = try self.resource_manager.loadShader("shaders/post_processing.vert", "shaders/post_processing.frag", null, "postprocessing");
+        const projection = zmath.orthographicOffCenterRhGl(
             0.0, // left
             @floatFromInt(self.width), // right
             0.0, // top
@@ -56,17 +60,22 @@ pub const Game = struct {
             -1.0,
             1.0, // near, far
         );
-        shader.setInteger("image", 0, true);
-        shader.setMatrix4("projection", projection, false);
-
-        self.renderer = sp.new(shader);
-        self.renderer.init();
+        sprite_shader.setInteger("image", 0, true);
+        sprite_shader.setMatrix4("projection", projection, false);
+        particle_shader.setInteger("sprite", 0, true);
+        particle_shader.setMatrix4("projection", projection, false);
 
         _ = try self.resource_manager.loadTexture("textures/background.jpg", "background");
         _ = try self.resource_manager.loadTexture("textures/awesomeface.png", "face");
-        _ = try self.resource_manager.loadTexture("textures/block_solid.png", "block_solid");
         _ = try self.resource_manager.loadTexture("textures/block.png", "block");
+        _ = try self.resource_manager.loadTexture("textures/block_solid.png", "block_solid");
         _ = try self.resource_manager.loadTexture("textures/paddle.png", "paddle");
+        const ptexture = try self.resource_manager.loadTexture("textures/particle.png", "particle");
+
+        self.renderer = sp.new(sprite_shader);
+        self.renderer.init();
+        self.particles = try ptcl.ParticleGenerator.init(self.allocator, 500, particle_shader, ptexture);
+        self.effects = try PostProcessor.init(effect_shader, self.width, self.height);
 
         self.levels[0] = try lvl.loadLevel(allocator, self.resource_manager, "levels/one.lvl", self.width, self.height / 2);
         self.levels[1] = try lvl.loadLevel(allocator, self.resource_manager, "levels/two.lvl", self.width, self.height / 2);
@@ -90,10 +99,6 @@ pub const Game = struct {
             .velocity = initial_ball_velocity,
         };
 
-        const pshader = try self.resource_manager.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
-        pshader.setMatrix4("projection", projection, true);
-        const ptexture = try self.resource_manager.loadTexture("textures/particle.png", "particle");
-        self.particles = try ptcl.ParticleGenerator.init(self.allocator, 500, pshader, ptexture);
         std.log.debug("game initialization complete.", .{});
     }
 
@@ -137,6 +142,13 @@ pub const Game = struct {
 
         self.particles.update(dt, self.ball, 2, zmath.f32x4(self.ball.radius / 2, self.ball.radius / 2, 0, 0));
 
+        if (self.shake_time > 0.0) {
+            self.shake_time -= @as(f32, @floatCast(dt));
+            if (self.shake_time <= 0.0) {
+                self.effects.shake = false;
+            }
+        }
+
         if (self.ball.position[1] >= @as(f32, @floatFromInt(self.height))) {
             // not sure i want to do this....start over?
             self.resetLevel();
@@ -146,6 +158,9 @@ pub const Game = struct {
 
     pub fn render(self: *Game) void {
         if (self.state == .game_active) {
+            // begin rendering to the post processing framebuffer
+            self.effects.beginRender();
+            // render the frame
             self.renderer.drawSprite(
                 self.resource_manager.getTexture("background").?,
                 zmath.f32x4(0.0, 0.0, 0.0, 1.0),
@@ -157,6 +172,10 @@ pub const Game = struct {
             self.player.draw(self.renderer);
             self.particles.draw();
             self.ball.draw(self.renderer);
+            // end rendering to the post processing framebuffer
+            self.effects.endRender();
+            // render the post processing quad
+            self.effects.render(@floatCast(glfw.getTime()));
         }
     }
 
@@ -186,6 +205,10 @@ pub const Game = struct {
                 if (collision_result.collided) {
                     if (!br.is_solid) {
                         br.destroyed = true;
+                    } else {
+                        // solid blocks enable the shake effect
+                        self.shake_time = 0.05;
+                        self.effects.shake = true;
                     }
                     // resolve the collision
                     switch (collision_result.direction.?) {

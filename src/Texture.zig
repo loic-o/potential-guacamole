@@ -14,7 +14,7 @@ pub fn generate(
     wrap_t: u32,
     filter_min: u32,
     filter_mag: u32,
-    data: []const u8,
+    data: ?[]const u8,
 ) Texture {
     var id: u32 = undefined;
     gl.genTextures(1, &id);
