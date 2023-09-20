@@ -21,13 +21,12 @@ pub const ParticleGenerator = struct {
     shader: Shader,
     sprite: Texture,
     particles: std.ArrayList(Particle),
-    prng: std.rand.Random,
+    prng: std.rand.DefaultPrng,
     vao: u32,
     arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, comptime max_particles: u32, shader: Shader, texture: Texture) !Self {
-        var rnd = std.rand.DefaultPrng.init(0);
-        var prng = rnd.random();
+        var prng = std.rand.DefaultPrng.init(9876);
 
         const p_quad = [_]f32{
             0, 1, 0, 1,
@@ -116,8 +115,8 @@ pub const ParticleGenerator = struct {
     }
 
     fn respawnParticle(self: *Self, particle: *Particle, ball: Ball, offset: zmath.Vec) void {
-        const random: f32 = self.prng.float(f32) * 10 - 5;
-        const rColor = 0.5 + self.prng.float(f32);
+        const random: f32 = self.prng.random().float(f32) * 10 - 5;
+        const rColor = 0.5 + self.prng.random().float(f32);
 
         particle.position = ball.position + [_]f32{ random, random, 0, 0 } + offset;
         particle.color = zmath.f32x4(rColor, rColor, rColor, 1.0);

@@ -60,7 +60,10 @@ pub fn main() !void {
 
         breakout.processInput(delta_time);
 
-        breakout.update(delta_time);
+        breakout.update(delta_time) catch |err| {
+            std.log.err("update failed. {}", .{err});
+            break;
+        };
 
         gl.clearColor(0.0, 0.0, 0.0, 1.0);
         gl.clear(gl.COLOR_BUFFER_BIT);

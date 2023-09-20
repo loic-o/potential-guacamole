@@ -26,9 +26,7 @@ void main() {
             color += vec4(sample[i] * edge_kernel[i], 0.0f);
         color.a = 1.0f;
     } else if (confuse) {
-        for (int i = 0; i < 9; i++)
-            color += vec4(1.0 - texture(scene, TexCoords).rgb, 1.0);
-        color.a = 1.0f;
+        color = vec4(1.0 - texture(scene, TexCoords).rgb, 1.0);
     } else if (shake) {
         for (int i = 0; i < 9; i++)
             color += vec4(sample[i] * blur_kernel[i], 0.0f);

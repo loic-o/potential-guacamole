@@ -8,6 +8,7 @@ const lvl = @import("level.zig");
 const ptcl = @import("particles.zig");
 const ResourceManager = @import("ResourceManager.zig");
 const PostProcessor = @import("PostProcessor.zig");
+const Powerup = @import("Powerup.zig");
 
 const default_player_size = zmath.f32x4(100.0, 20.0, 0.0, 0.0);
 const default_player_velocity: f32 = 500.0;
@@ -44,10 +45,14 @@ pub const Game = struct {
     resource_manager: ResourceManager = undefined,
     effects: PostProcessor = undefined,
     shake_time: f32 = 0.0,
+    powerups: std.ArrayList(Powerup) = undefined,
+    rng: std.rand.DefaultPrng = undefined,
 
     pub fn init(self: *Game, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.resource_manager = ResourceManager.init(allocator);
+
+        self.rng = std.rand.DefaultPrng.init(234234);
 
         const sprite_shader = try self.resource_manager.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
         const particle_shader = try self.resource_manager.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
@@ -71,11 +76,18 @@ pub const Game = struct {
         _ = try self.resource_manager.loadTexture("textures/block_solid.png", "block_solid");
         _ = try self.resource_manager.loadTexture("textures/paddle.png", "paddle");
         const ptexture = try self.resource_manager.loadTexture("textures/particle.png", "particle");
+        _ = try self.resource_manager.loadTexture("textures/powerup_speed.png", "speed");
+        _ = try self.resource_manager.loadTexture("textures/powerup_sticky.png", "sticky");
+        _ = try self.resource_manager.loadTexture("textures/powerup_passthrough.png", "passThrough");
+        _ = try self.resource_manager.loadTexture("textures/powerup_increase.png", "padSizeIncrease");
+        _ = try self.resource_manager.loadTexture("textures/powerup_confuse.png", "confuse");
+        _ = try self.resource_manager.loadTexture("textures/powerup_chaos.png", "chaos");
 
         self.renderer = sp.new(sprite_shader);
         self.renderer.init();
         self.particles = try ptcl.ParticleGenerator.init(self.allocator, 500, particle_shader, ptexture);
         self.effects = try PostProcessor.init(effect_shader, self.width, self.height);
+        self.powerups = std.ArrayList(Powerup).init(allocator);
 
         self.levels[0] = try lvl.loadLevel(allocator, self.resource_manager, "levels/one.lvl", self.width, self.height / 2);
         self.levels[1] = try lvl.loadLevel(allocator, self.resource_manager, "levels/two.lvl", self.width, self.height / 2);
@@ -107,6 +119,10 @@ pub const Game = struct {
         for (&self.levels) |*level| {
             level.deinit();
         }
+        for (self.powerups.items) |*pu| {
+            pu.deinit();
+        }
+        self.powerups.deinit();
         self.renderer.deinit();
         self.resource_manager.deinit();
     }
@@ -136,11 +152,13 @@ pub const Game = struct {
         }
     }
 
-    pub fn update(self: *Game, dt: f64) void {
+    pub fn update(self: *Game, dt: f64) !void {
         _ = self.ball.move(dt, self.width);
-        self.doCollisions();
+        try self.doCollisions();
 
         self.particles.update(dt, self.ball, 2, zmath.f32x4(self.ball.radius / 2, self.ball.radius / 2, 0, 0));
+
+        self.updatePowerups(dt);
 
         if (self.shake_time > 0.0) {
             self.shake_time -= @as(f32, @floatCast(dt));
@@ -156,6 +174,154 @@ pub const Game = struct {
         }
     }
 
+    fn shouldSpawn(self: *Game, chance: u32) bool {
+        var random: u32 = self.rng.random().uintLessThan(u32, 1 << 16);
+        // std.log.debug("rng: {}", .{random});
+        return ((random % chance) == 0);
+    }
+
+    fn spawnPowerups(self: *Game, block: lvl.Brick) !void {
+        if (self.shouldSpawn(75)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.speed, // type
+                zmath.f32x4(0.5, 0.5, 1.0, 1.0), // color
+                0.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("speed").?, // texture
+            ));
+        }
+        if (self.shouldSpawn(75)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.sticky, // type
+                zmath.f32x4(1.0, 0.5, 1.0, 1.0), // color
+                20.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("sticky").?, // texture
+            ));
+        }
+        if (self.shouldSpawn(75)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.passThrough, // type
+                zmath.f32x4(0.5, 1.0, 0.5, 1.0), // color
+                10.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("passThrough").?, // texture
+            ));
+        }
+        if (self.shouldSpawn(75)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.padSizeIncrease, // type
+                zmath.f32x4(1.0, 0.6, 0.4, 1.0), // color
+                0.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("padSizeIncrease").?, // texture
+            ));
+        }
+        if (self.shouldSpawn(15)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.confuse, // type
+                zmath.f32x4(1.0, 0.3, 0.3, 1.0), // color
+                15.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("confuse").?, // texture
+            ));
+        }
+        if (self.shouldSpawn(15)) {
+            try self.powerups.append(Powerup.init(
+                Powerup.PowerupType.chaos, // type
+                zmath.f32x4(0.9, 0.25, 0.25, 1.0), // color
+                15.0, // duration
+                block.position, // position
+                self.resource_manager.getTexture("chaos").?, // texture
+            ));
+        }
+    }
+
+    fn activatePowerup(self: *Game, powerup: Powerup) void {
+        switch (powerup.type) {
+            .speed => self.ball.velocity *= zmath.f32x4(1.2, 1.2, 1, 1),
+            .sticky => {
+                self.ball.sticky = true;
+                self.player.color = zmath.f32x4(1.0, 0.5, 1.0, 1.0);
+            },
+            .passThrough => {
+                self.ball.passThrough = true;
+                self.ball.color = zmath.f32x4(1.0, 0.5, 0.5, 1.0);
+            },
+            .padSizeIncrease => self.player.size[0] += 50.0,
+            .confuse => {
+                if (!self.effects.chaos) {
+                    self.effects.confuse = true;
+                }
+            },
+            .chaos => {
+                if (!self.effects.confuse) {
+                    self.effects.chaos = true;
+                }
+            },
+        }
+    }
+
+    fn updatePowerups(self: *Game, delta_time: f64) void {
+        const dt: f32 = @as(f32, @floatCast(delta_time));
+        for (self.powerups.items) |*pu| {
+            pu.position += (pu.velocity * zmath.f32x4(dt, dt, 1, 1));
+            if (pu.activated) {
+                pu.duration -= dt;
+                if (pu.duration <= 0.0) {
+                    // remove powerup from list (will later be removed)
+                    pu.activated = false;
+                    // deactivate effects
+                    switch (pu.type) {
+                        .sticky => {
+                            if (!isOtherPowerupActive(self.powerups, .sticky)) {
+                                // only reset if no other powerup of type sticky is active
+                                self.ball.sticky = false;
+                                self.player.color = zmath.f32x4s(1.0);
+                            }
+                        },
+                        .passThrough => {
+                            if (!isOtherPowerupActive(self.powerups, .passThrough)) {
+                                // only reset if no other powerup of type passThrough is active
+                                self.ball.passThrough = false;
+                                self.player.color = zmath.f32x4s(1.0);
+                            }
+                        },
+                        .confuse => {
+                            if (!isOtherPowerupActive(self.powerups, .confuse)) {
+                                // only reset if no other powerup of type confuse is active
+                                self.effects.confuse = false;
+                            }
+                        },
+                        .chaos => {
+                            if (!isOtherPowerupActive(self.powerups, .chaos)) {
+                                // only reset if no other powerup of type chaos is active
+                                self.effects.chaos = false;
+                            }
+                        },
+                        else => {},
+                    }
+                }
+            }
+        }
+        // clear out destroyed powerups;
+        var i: usize = 0;
+        while (i < self.powerups.items.len) {
+            if (self.powerups.items[i].destroyed and !self.powerups.items[i].activated) {
+                _ = self.powerups.orderedRemove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    fn isOtherPowerupActive(list: std.ArrayList(Powerup), pu_type: Powerup.PowerupType) bool {
+        for (list.items) |pu| {
+            if (pu.activated and pu.type == pu_type) return true;
+        }
+        return false;
+    }
+
     pub fn render(self: *Game) void {
         if (self.state == .game_active) {
             // begin rendering to the post processing framebuffer
@@ -168,9 +334,18 @@ pub const Game = struct {
                 0.0,
                 zmath.f32x4s(1.0),
             );
+
             self.levels[self.current_level].draw(self.renderer);
+
+            for (self.powerups.items) |pu| {
+                if (!pu.destroyed) {
+                    pu.draw(self.renderer);
+                }
+            }
+
             self.player.draw(self.renderer);
             self.particles.draw();
+
             self.ball.draw(self.renderer);
             // end rendering to the post processing framebuffer
             self.effects.endRender();
@@ -197,7 +372,7 @@ pub const Game = struct {
         self.ball.position = ball_pos;
     }
 
-    fn doCollisions(self: *Game) void {
+    fn doCollisions(self: *Game) !void {
         // check all the bricks...
         for (self.levels[self.current_level].bricks.items) |*br| {
             if (!br.destroyed) {
@@ -205,34 +380,51 @@ pub const Game = struct {
                 if (collision_result.collided) {
                     if (!br.is_solid) {
                         br.destroyed = true;
+                        try self.spawnPowerups(br.*);
                     } else {
                         // solid blocks enable the shake effect
                         self.shake_time = 0.05;
                         self.effects.shake = true;
                     }
                     // resolve the collision
-                    switch (collision_result.direction.?) {
-                        .left, .right => {
-                            self.ball.velocity[0] = -self.ball.velocity[0]; // reverse horizontal Direction
-                            // relocate
-                            const penetration = self.ball.radius - @fabs(collision_result.difference.?[0]);
-                            if (collision_result.direction.? == .left) {
-                                self.ball.position[0] += penetration;
-                            } else {
-                                self.ball.position[0] -= penetration;
-                            }
-                        },
-                        else => {
-                            self.ball.velocity[1] = -self.ball.velocity[1]; // reverse vertical Direction
-                            // relocate
-                            const penetration = self.ball.radius - @fabs(collision_result.difference.?[1]);
-                            if (collision_result.direction.? == .up) {
-                                self.ball.position[1] -= penetration;
-                            } else {
-                                self.ball.position[1] += penetration;
-                            }
-                        },
+                    if (!(self.ball.passThrough and !br.is_solid)) {
+                        switch (collision_result.direction.?) {
+                            .left, .right => {
+                                self.ball.velocity[0] = -self.ball.velocity[0]; // reverse horizontal Direction
+                                // relocate
+                                const penetration = self.ball.radius - @fabs(collision_result.difference.?[0]);
+                                if (collision_result.direction.? == .left) {
+                                    self.ball.position[0] += penetration;
+                                } else {
+                                    self.ball.position[0] -= penetration;
+                                }
+                            },
+                            else => {
+                                self.ball.velocity[1] = -self.ball.velocity[1]; // reverse vertical Direction
+                                // relocate
+                                const penetration = self.ball.radius - @fabs(collision_result.difference.?[1]);
+                                if (collision_result.direction.? == .up) {
+                                    self.ball.position[1] -= penetration;
+                                } else {
+                                    self.ball.position[1] += penetration;
+                                }
+                            },
+                        }
                     }
+                }
+            }
+        }
+        // check for collisions with powerups
+        for (self.powerups.items) |*pu| {
+            if (!pu.destroyed) {
+                if (pu.position[1] >= @as(f32, @floatFromInt(self.height))) {
+                    pu.destroyed = true;
+                }
+                if (checkCollision(self.player.position, self.player.size, pu.position, pu.size)) {
+                    // collided w/ player, activate it!
+                    self.activatePowerup(pu.*);
+                    pu.destroyed = true;
+                    pu.activated = true;
                 }
             }
         }
@@ -252,6 +444,8 @@ pub const Game = struct {
             // so always just assume that it hit the top (so it wont bounce down and try again...
             self.ball.velocity[1] = -1.0 * @fabs(self.ball.velocity[1]);
             self.ball.velocity = zmath.normalize2(self.ball.velocity) * zmath.length2(old_velocity);
+            // if the ball is sticky, mark it as stuck b/c it just landed on the paddle.
+            self.ball.stuck = self.ball.sticky;
         }
     }
 };
@@ -278,6 +472,8 @@ pub const Ball = struct {
     sprite: ?Texture,
     radius: f32 = 12.5,
     stuck: bool = true,
+    sticky: bool = false,
+    passThrough: bool = false,
 
     pub fn move(self: *@This(), dt: f64, window_width: u32) zmath.Vec {
         const ww = @as(f32, @floatFromInt(window_width));
