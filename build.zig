@@ -5,6 +5,7 @@ const zopengl = @import("libs/zopengl/build.zig");
 const zstbi = @import("libs/zstbi/build.zig");
 const zmath = @import("libs/zmath/build.zig");
 const zmesh = @import("libs/zmesh/build.zig");
+const zaudio = @import("libs/zaudio/build.zig");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -28,6 +29,7 @@ pub fn build(b: *std.Build) void {
         .options = .{ .enable_cross_platform_determinism = true },
     });
     const zmesh_pkg = zmesh.package(b, target, optimize, .{});
+    const zaudio_pkg = zaudio.package(b, target, optimize, .{});
 
     const exe = b.addExecutable(.{
         .name = "oglbo",
@@ -43,6 +45,7 @@ pub fn build(b: *std.Build) void {
     zstbi_pkg.link(exe);
     zmath_pkg.link(exe);
     zmesh_pkg.link(exe);
+    zaudio_pkg.link(exe);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default

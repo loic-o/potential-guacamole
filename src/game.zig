@@ -1,6 +1,7 @@
 const std = @import("std");
 const glfw = @import("zglfw");
 const zmath = @import("zmath");
+const zaudio = @import("zaudio");
 
 const Texture = @import("Texture.zig");
 const sp = @import("sprite.zig");
@@ -30,6 +31,46 @@ pub fn new(width: u32, height: u32) Game {
     };
 }
 
+const Sounds = struct {
+    engine: *zaudio.Engine = undefined,
+    bg_music: *zaudio.Sound = undefined,
+    brick_collide: *zaudio.Sound = undefined,
+    solid_collide: *zaudio.Sound = undefined,
+    paddle_collide: *zaudio.Sound = undefined,
+    powerup: *zaudio.Sound = undefined,
+
+    pub fn init(allocator: std.mem.Allocator) !Sounds {
+        zaudio.init(allocator);
+        const engine = try zaudio.Engine.create(null);
+        const self = Sounds{
+            .engine = engine,
+            .bg_music = try engine.createSoundFromFile("audio/breakout.mp3", .{ .flags = .{ .stream = true } }),
+            .brick_collide = try engine.createSoundFromFile("audio/bleep.mp3", .{}),
+            .solid_collide = try engine.createSoundFromFile("audio/solid.wav", .{}),
+            .paddle_collide = try engine.createSoundFromFile("audio/bleep.wav", .{}),
+            .powerup = try engine.createSoundFromFile("audio/powerup.wav", .{}),
+        };
+        self.bg_music.setLooping(true);
+        self.bg_music.setVolume(0.5);
+        try self.bg_music.start();
+        return self;
+    }
+
+    pub fn deinit(self: *Sounds) !void {
+        if (self.bg_music.isPlaying()) {
+            try self.bg_music.stop();
+        }
+        self.bg_music.destroy();
+        self.brick_collide.destroy();
+        self.solid_collide.destroy();
+        self.paddle_collide.destroy();
+        self.powerup.destroy();
+
+        self.engine.destroy();
+        zaudio.deinit();
+    }
+};
+
 pub const Game = struct {
     allocator: std.mem.Allocator = undefined,
     state: GameState = GameState.game_active,
@@ -47,6 +88,7 @@ pub const Game = struct {
     shake_time: f32 = 0.0,
     powerups: std.ArrayList(Powerup) = undefined,
     rng: std.rand.DefaultPrng = undefined,
+    audio: Sounds = undefined,
 
     pub fn init(self: *Game, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
@@ -88,6 +130,7 @@ pub const Game = struct {
         self.particles = try ptcl.ParticleGenerator.init(self.allocator, 500, particle_shader, ptexture);
         self.effects = try PostProcessor.init(effect_shader, self.width, self.height);
         self.powerups = std.ArrayList(Powerup).init(allocator);
+        self.audio = try Sounds.init(allocator);
 
         self.levels[0] = try lvl.loadLevel(allocator, self.resource_manager, "levels/one.lvl", self.width, self.height / 2);
         self.levels[1] = try lvl.loadLevel(allocator, self.resource_manager, "levels/two.lvl", self.width, self.height / 2);
@@ -115,6 +158,9 @@ pub const Game = struct {
     }
 
     pub fn deinit(self: *Game) void {
+        self.audio.deinit() catch |err| {
+            std.log.err("failed to deinit sound: {}", .{err});
+        };
         self.particles.deinit();
         for (&self.levels) |*level| {
             level.deinit();
@@ -381,10 +427,12 @@ pub const Game = struct {
                     if (!br.is_solid) {
                         br.destroyed = true;
                         try self.spawnPowerups(br.*);
+                        self.audio.brick_collide.start() catch {};
                     } else {
                         // solid blocks enable the shake effect
                         self.shake_time = 0.05;
                         self.effects.shake = true;
+                        self.audio.solid_collide.start() catch {};
                     }
                     // resolve the collision
                     if (!(self.ball.passThrough and !br.is_solid)) {
@@ -425,6 +473,7 @@ pub const Game = struct {
                     self.activatePowerup(pu.*);
                     pu.destroyed = true;
                     pu.activated = true;
+                    self.audio.powerup.start() catch {};
                 }
             }
         }
@@ -446,6 +495,8 @@ pub const Game = struct {
             self.ball.velocity = zmath.normalize2(self.ball.velocity) * zmath.length2(old_velocity);
             // if the ball is sticky, mark it as stuck b/c it just landed on the paddle.
             self.ball.stuck = self.ball.sticky;
+
+            self.audio.paddle_collide.start() catch {};
         }
     }
 };
