@@ -47,6 +47,12 @@ pub fn build(b: *std.Build) void {
     zmesh_pkg.link(exe);
     zaudio_pkg.link(exe);
 
+    const mach_freetype_dep = b.dependency("mach_freetype", .{ .target = target, .optimize = optimize });
+    exe.addModule("mach-freetype", mach_freetype_dep.module("mach-freetype"));
+    exe.addModule("mach-harfbuzz", mach_freetype_dep.module("mach-harfbuzz"));
+    @import("mach_freetype").linkFreetype(mach_freetype_dep.builder, exe);
+    @import("mach_freetype").linkHarfbuzz(mach_freetype_dep.builder, exe);
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
