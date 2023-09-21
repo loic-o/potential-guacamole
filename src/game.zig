@@ -10,26 +10,12 @@ const ptcl = @import("particles.zig");
 const ResourceManager = @import("ResourceManager.zig");
 const PostProcessor = @import("PostProcessor.zig");
 const Powerup = @import("Powerup.zig");
+const TextRenderer = @import("TextRenderer.zig");
 
 const default_player_size = zmath.f32x4(100.0, 20.0, 0.0, 0.0);
 const default_player_velocity: f32 = 500.0;
 const initial_ball_velocity = zmath.f32x4(100.0, -350.0, 0.0, 0.0);
 const default_ball_radius: f32 = 12.5;
-
-pub const GameState = enum {
-    game_active,
-    game_menu,
-    game_win,
-};
-
-pub fn new(width: u32, height: u32) Game {
-    return Game{
-        .keys = [_]bool{false} ** 1024,
-        .width = width,
-        .height = height,
-        .levels = [_]lvl.Level{undefined} ** 4,
-    };
-}
 
 const Sounds = struct {
     engine: *zaudio.Engine = undefined,
@@ -42,6 +28,7 @@ const Sounds = struct {
     pub fn init(allocator: std.mem.Allocator) !Sounds {
         zaudio.init(allocator);
         const engine = try zaudio.Engine.create(null);
+        try engine.setVolume(0.5);
         const self = Sounds{
             .engine = engine,
             .bg_music = try engine.createSoundFromFile("audio/breakout.mp3", .{ .flags = .{ .stream = true } }),
@@ -51,7 +38,7 @@ const Sounds = struct {
             .powerup = try engine.createSoundFromFile("audio/powerup.wav", .{}),
         };
         self.bg_music.setLooping(true);
-        self.bg_music.setVolume(0.5);
+        self.bg_music.setVolume(0.4);
         try self.bg_music.start();
         return self;
     }
@@ -71,10 +58,27 @@ const Sounds = struct {
     }
 };
 
+pub const GameState = enum {
+    game_active,
+    game_menu,
+    game_win,
+};
+
+pub fn new(width: u32, height: u32) Game {
+    return Game{
+        .keys = [_]bool{false} ** 1024,
+        .keys_processed = [_]bool{false} ** 1024,
+        .width = width,
+        .height = height,
+        .levels = [_]lvl.Level{undefined} ** 4,
+    };
+}
+
 pub const Game = struct {
     allocator: std.mem.Allocator = undefined,
-    state: GameState = GameState.game_active,
+    state: GameState = GameState.game_menu,
     keys: [1024]bool,
+    keys_processed: [1024]bool,
     width: u32,
     height: u32,
     renderer: sp.Renderer = undefined,
@@ -89,12 +93,15 @@ pub const Game = struct {
     powerups: std.ArrayList(Powerup) = undefined,
     rng: std.rand.DefaultPrng = undefined,
     audio: Sounds = undefined,
+    text_renderer: TextRenderer = undefined,
+    lives: u8 = 3,
 
     pub fn init(self: *Game, allocator: std.mem.Allocator) !void {
         self.allocator = allocator;
         self.resource_manager = ResourceManager.init(allocator);
 
-        self.rng = std.rand.DefaultPrng.init(234234);
+        const seed: u64 = @intCast(std.time.microTimestamp());
+        self.rng = std.rand.DefaultPrng.init(seed);
 
         const sprite_shader = try self.resource_manager.loadShader("shaders/sprite.vert", "shaders/sprite.frag", null, "sprite");
         const particle_shader = try self.resource_manager.loadShader("shaders/particle.vert", "shaders/particle.frag", null, "particle");
@@ -131,6 +138,8 @@ pub const Game = struct {
         self.effects = try PostProcessor.init(effect_shader, self.width, self.height);
         self.powerups = std.ArrayList(Powerup).init(allocator);
         self.audio = try Sounds.init(allocator);
+        self.text_renderer = try TextRenderer.init(allocator, &self.resource_manager, self.width, self.height);
+        try self.text_renderer.load("fonts/Skranji-Bold.ttf", 24);
 
         self.levels[0] = try lvl.loadLevel(allocator, self.resource_manager, "levels/one.lvl", self.width, self.height / 2);
         self.levels[1] = try lvl.loadLevel(allocator, self.resource_manager, "levels/two.lvl", self.width, self.height / 2);
@@ -168,12 +177,32 @@ pub const Game = struct {
         for (self.powerups.items) |*pu| {
             pu.deinit();
         }
+        self.text_renderer.deinit();
         self.powerups.deinit();
         self.renderer.deinit();
         self.resource_manager.deinit();
     }
 
     pub fn processInput(self: *Game, dt: f64) void {
+        if (self.state == .game_menu) {
+            if (self.keys[@intFromEnum(glfw.Key.enter)] and !self.keys_processed[@intFromEnum(glfw.Key.enter)]) {
+                self.state = .game_active;
+                self.keys_processed[@intFromEnum(glfw.Key.enter)] = true;
+            }
+            if (self.keys[@intFromEnum(glfw.Key.w)] and !self.keys_processed[@intFromEnum(glfw.Key.w)]) {
+                self.current_level = (self.current_level + 1) % 4;
+                self.keys_processed[@intFromEnum(glfw.Key.w)] = true;
+            }
+            if (self.keys[@intFromEnum(glfw.Key.s)] and !self.keys_processed[@intFromEnum(glfw.Key.s)]) {
+                if (self.current_level > 0) {
+                    self.current_level -= 1;
+                } else {
+                    self.current_level = 3;
+                }
+                self.keys_processed[@intFromEnum(glfw.Key.s)] = true;
+            }
+        }
+
         if (self.state == .game_active) {
             const vel: f32 = self.player.velocity[0] * @as(f32, @floatCast(dt));
             if (self.keys[@intFromEnum(glfw.Key.a)]) {
@@ -196,6 +225,14 @@ pub const Game = struct {
                 self.ball.stuck = false;
             }
         }
+
+        if (self.state == .game_win) {
+            if (self.keys[@intFromEnum(glfw.Key.enter)]) {
+                self.keys_processed[@intFromEnum(glfw.Key.enter)] = true;
+                self.effects.chaos = false;
+                self.state = .game_menu;
+            }
+        }
     }
 
     pub fn update(self: *Game, dt: f64) !void {
@@ -214,9 +251,19 @@ pub const Game = struct {
         }
 
         if (self.ball.position[1] >= @as(f32, @floatFromInt(self.height))) {
-            // not sure i want to do this....start over?
+            self.lives -= 1;
+            if (self.lives == 0) {
+                self.resetLevel();
+                self.state = .game_menu;
+            }
+            self.resetPlayer();
+        }
+
+        if (self.state == .game_active and self.levels[self.current_level].isCompleted()) {
             self.resetLevel();
             self.resetPlayer();
+            self.effects.chaos = true;
+            self.state = .game_win;
         }
     }
 
@@ -393,10 +440,44 @@ pub const Game = struct {
             self.particles.draw();
 
             self.ball.draw(self.renderer);
+
+            if (std.fmt.allocPrint(self.allocator, "Lives: {d}", .{self.lives})) |s| {
+                defer self.allocator.free(s);
+                self.text_renderer.renderText(s, 5, 5, 1, zmath.f32x4s(1.0)) catch unreachable;
+            } else |_| {
+                unreachable;
+            }
+
             // end rendering to the post processing framebuffer
             self.effects.endRender();
             // render the post processing quad
             self.effects.render(@floatCast(glfw.getTime()));
+        }
+
+        if (self.state == .game_menu) {
+            self.renderer.drawSprite(
+                self.resource_manager.getTexture("background").?,
+                zmath.f32x4(0.0, 0.0, 0.0, 1.0),
+                zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
+                0.0,
+                zmath.f32x4s(1.0),
+            );
+            self.levels[self.current_level].draw(self.renderer);
+            self.text_renderer.renderText("Press ENTER to start", 250.0, @as(f32, @floatFromInt(self.height)) / 2.0, 1.0, zmath.f32x4s(1.0)) catch unreachable;
+            self.text_renderer.renderText("Press W or S to select level", 245.0, @as(f32, @floatFromInt(self.height)) / 2.0 + 20.0, 0.75, zmath.f32x4s(1.0)) catch unreachable;
+        }
+
+        if (self.state == .game_win) {
+            self.renderer.drawSprite(
+                self.resource_manager.getTexture("background").?,
+                zmath.f32x4(0.0, 0.0, 0.0, 1.0),
+                zmath.f32x4(@as(f32, @floatFromInt(self.width)), @as(f32, @floatFromInt(self.height)), 1.0, 0.0),
+                0.0,
+                zmath.f32x4s(1.0),
+            );
+            self.levels[self.current_level].draw(self.renderer);
+            self.text_renderer.renderText("You WON!!!", 320.0, @as(f32, @floatFromInt(self.height)) / 2.0 - 10.0, 1.0, zmath.f32x4(0.0, 1.0, 0.0, 1.0)) catch unreachable;
+            self.text_renderer.renderText("Press ENTER to retry or ESC to quit", 130.0, @as(f32, @floatFromInt(self.height)) / 2.0, 1.0, zmath.f32x4(1.0, 1.0, 0.0, 1.0)) catch unreachable;
         }
     }
 
@@ -404,6 +485,7 @@ pub const Game = struct {
         for (self.levels[self.current_level].bricks.items) |*br| {
             br.destroyed = false;
         }
+        self.lives = 3;
     }
 
     fn resetPlayer(self: *@This()) void {
@@ -615,5 +697,7 @@ fn vectorDirection(target: zmath.Vec) Direction {
             best_match = i;
         }
     }
+    // TODO: fix paddle collision crash
+    // it crashes here when the ball makes it below the paddle and/or it hits the side
     return @enumFromInt(best_match.?);
 }

@@ -48,8 +48,8 @@ pub fn build(b: *std.Build) void {
     zaudio_pkg.link(exe);
 
     const mach_freetype_dep = b.dependency("mach_freetype", .{ .target = target, .optimize = optimize });
-    exe.addModule("mach-freetype", mach_freetype_dep.module("mach-freetype"));
-    exe.addModule("mach-harfbuzz", mach_freetype_dep.module("mach-harfbuzz"));
+    exe.addModule("freetype", mach_freetype_dep.module("mach-freetype"));
+    exe.addModule("harfbuzz", mach_freetype_dep.module("mach-harfbuzz"));
     @import("mach_freetype").linkFreetype(mach_freetype_dep.builder, exe);
     @import("mach_freetype").linkHarfbuzz(mach_freetype_dep.builder, exe);
 

@@ -107,8 +107,12 @@ pub const Level = struct {
     }
 
     pub fn isCompleted(self: @This()) bool {
-        _ = self;
-        return false;
+        for (self.bricks.items) |br| {
+            if (!br.is_solid and !br.destroyed) {
+                return false;
+            }
+        }
+        return true;
     }
 
     pub fn deinit(self: *@This()) void {

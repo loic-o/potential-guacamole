@@ -89,6 +89,7 @@ fn keyCallback(window: *glfw.Window, key: glfw.Key, scancode: i32, action: glfw.
             breakout.keys[ikey] = true;
         } else if (action == glfw.Action.release) {
             breakout.keys[ikey] = false;
+            breakout.keys_processed[ikey] = false;
         }
     }
 }
