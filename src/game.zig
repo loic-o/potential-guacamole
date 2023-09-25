@@ -697,7 +697,10 @@ fn vectorDirection(target: zmath.Vec) Direction {
             best_match = i;
         }
     }
-    // TODO: fix paddle collision crash
-    // it crashes here when the ball makes it below the paddle and/or it hits the side
-    return @enumFromInt(best_match.?);
+    if (best_match == null) {
+        std.log.debug("coll crash: {any} - {}", .{ target, zmath.lengthSq3(target) });
+        return Direction.up;
+    } else {
+        return @enumFromInt(best_match.?);
+    }
 }
